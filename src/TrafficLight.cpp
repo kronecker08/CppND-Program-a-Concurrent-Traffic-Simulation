@@ -1,6 +1,8 @@
 #include <iostream>
 #include <random>
 #include "TrafficLight.h"
+#include <thread>
+#include <future>
 
 /* Implementation of class "MessageQueue" */
 
@@ -24,6 +26,7 @@ void MessageQueue<T>::send(T &&msg)
     // FP.4a : The method send should use the mechanisms std::lock_guard<std::mutex> 
     // as well as _condition.notify_one() to add a new message to the queue and afterwards send a notification.
     std::lock_guard<std::mutex> uLock(_mutex);
+    _queue.clear();
     _queue.push_back(std::move(msg));
     _cond.notify_one();
 }
@@ -65,14 +68,29 @@ void TrafficLight::cycleThroughPhases()
     // and toggles the current phase of the traffic light between red and green and sends an update method 
     // to the message queue using move semantics. The cycle duration should be a random value between 4 and 6 seconds. 
     // Also, the while-loop should use std::this_thread::sleep_for to wait 1ms between two cycles. 
+    _messageQueue.send(std::move(_currentPhase));
+    std::chrono::time_point<std::chrono::system_clock> lastUpdate;
 
-    while(true){
-        std::this_thread::sleep_for(std::chrono::milliseconds (1));
-        _messageQueue.send(std::move(_currentPhase));
-        std::this_thread::sleep_for(std::chrono::milliseconds (rand() % 4000 + 2001));
-        _currentPhase = TrafficLightPhase::green;
-        _messageQueue.send(std::move(_currentPhase));
-        std::this_thread::sleep_for(std::chrono::milliseconds (rand() % 4000 + 2001));
-        _currentPhase = TrafficLightPhase::red;
+    // init stop watch
+    lastUpdate = std::chrono::system_clock::now();
+    int cycleDuration =  (rand() % 4000 + 2001);
+    while (true)
+    {
+        // sleep at every iteration to reduce CPU usage
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        // compute time difference to stop watch
+        int timeSinceLastUpdate = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - lastUpdate).count();
+        if (timeSinceLastUpdate >= cycleDuration){
+            if (_currentPhase == TrafficLightPhase::green){
+                _currentPhase = TrafficLightPhase::red;
+            }
+            else{
+                _currentPhase = TrafficLightPhase::green;
+            }
+            auto sentFuture = std::async(std::launch::async,&MessageQueue<TrafficLightPhase>::send,&_messageQueue,std::move(_currentPhase));
+            sentFuture.get();
+            cycleDuration =  (rand() % 4000 + 2001);
+            lastUpdate = std::chrono::system_clock::now();
+        }
     }
 }
